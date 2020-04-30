@@ -36,8 +36,7 @@ library
     exposed-modules:
         Test.Tasty.JsonReporter
     build-depends:
-          aeson >= 1.4
-        , base >=4.10 && <4.15
+          base >=4.10 && <4.15
         , containers >= 0.6
         , bytestring >=0.10
         , stm >= 2.4

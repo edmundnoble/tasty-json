@@ -21,13 +21,14 @@ module Test.Tasty.JsonReporter
 import Control.Concurrent.STM
 import Control.Monad
 
-import Data.Aeson hiding (Result, Success)
-import Data.Aeson.Encoding
-import Data.Aeson.Encoding.Internal
 import qualified Data.ByteString.Builder as BB
+import qualified Data.ByteString.Builder.Prim as BP
 import qualified Data.IntMap as M
 import Data.Proxy
 import Data.Tagged
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import Data.Word
 
 import System.IO
 
@@ -36,42 +37,126 @@ import Test.Tasty.Options
 import Test.Tasty.Runners
 
 -- -------------------------------------------------------------------------- --
--- JSON Encoding Utils
+-- Primitive JSON encodings
 
-data ArrayEnc = EmptyArray | ArrayEnc (Encoding' InArray)
+-- | According to [ECMA-404](https://www.json.org) only @"@ and @\\@ must be
+-- escaped. For a more readable result we include some optional escape
+-- sequences.
+--
+escaped :: BP.BoundedPrim Word8
+escaped
+    = BP.condB (== w '\b') (e 'b')
+    $ BP.condB (== w '\f') (e 'f')
+    $ BP.condB (== w '\n') (e 'n')
+    $ BP.condB (== w '\r') (e 'r')
+    $ BP.condB (== w '\t') (e 't')
+    $ BP.condB (== w '"') (e '"')
+    $ BP.condB (== w '\\') (e '\\')
+    $ BP.liftFixedToBounded BP.word8
+  where
+    w :: Char -> Word8
+    w c = toEnum (fromEnum c)
+    {-# INLINE w #-}
 
-instance Semigroup ArrayEnc where
-    EmptyArray <> a = a
-    a <> EmptyArray = a
-    (ArrayEnc a) <> (ArrayEnc b) = ArrayEnc (a >*< b)
+    e :: Char -> BP.BoundedPrim Word8
+    e c = BP.liftFixedToBounded (const (w '\\', w c) BP.>$< (BP.word8 BP.>*< BP.word8))
+    {-# INLINE e #-}
+{-# INLINE escaped #-}
+
+quoted :: BB.Builder -> BB.Builder
+quoted a = BB.char7 '"' <> a <> BB.char7 '"'
+{-# INLINE quoted #-}
+
+text :: T.Text -> BB.Builder
+text = quoted . T.encodeUtf8BuilderEscaped escaped
+{-# INLINE text #-}
+
+string :: String -> BB.Builder
+string = text . T.pack
+{-# INLINE string #-}
+
+int :: Int -> BB.Builder
+int = BB.intDec
+{-# INLINE int #-}
+
+double :: Double -> BB.Builder
+double = BB.doubleDec
+{-# INLINE double #-}
+
+bool :: Bool -> BB.Builder
+bool True = "true"
+bool False = "false"
+{-# INLINE bool #-}
+
+nul :: BB.Builder
+nul = "null"
+{-# INLINE nul #-}
+
+-- -------------------------------------------------------------------------- --
+-- Encode JSON Objects
+
+data Object = EmptyObject | Object BB.Builder
+
+instance Semigroup Object where
+    EmptyObject <> a = a
+    a <> EmptyObject = a
+    (Object a) <> (Object b) = Object (a <> "," <> b)
     {-# INLINE (<>) #-}
 
-instance Monoid ArrayEnc where
+instance Monoid Object where
+    mempty = EmptyObject
+    {-# INLINE mempty #-}
+
+assoc :: T.Text -> BB.Builder -> Object
+assoc key value = Object $ text key <> ":" <> value
+{-# INLINE assoc #-}
+
+(.=) :: T.Text -> BB.Builder -> Object
+(.=) = assoc
+{-# INLINE (.=) #-}
+
+object :: Object -> BB.Builder
+object EmptyObject = "{" <> "}"
+object (Object e) = "{" <> e <> "}"
+{-# INLINE object #-}
+
+-- -------------------------------------------------------------------------- --
+-- Encode JSON Arrays
+
+data Array = EmptyArray | Array BB.Builder
+
+instance Semigroup Array where
+    EmptyArray <> a = a
+    a <> EmptyArray = a
+    (Array a) <> (Array b) = Array (a <> "," <> b)
+    {-# INLINE (<>) #-}
+
+instance Monoid Array where
     mempty = EmptyArray
     {-# INLINE mempty #-}
 
-item :: Encoding -> ArrayEnc
-item = ArrayEnc . retagEncoding
+item :: BB.Builder -> Array
+item = Array
 {-# INLINE item #-}
 
-arrayEnc :: ArrayEnc -> Encoding
-arrayEnc EmptyArray = emptyArray_
-arrayEnc (ArrayEnc e) = tuple e
-{-# INLINE arrayEnc #-}
+array :: Array -> BB.Builder
+array EmptyArray = "[" <> "]"
+array (Array e) = "[" <> e <> "]"
+{-# INLINE array #-}
 
 -- -------------------------------------------------------------------------- --
 -- JSON Encoding for results
 
-resultEncoding :: String -> Result -> Encoding
-resultEncoding n r = pairs
-    $ "name" .= n
-    <> "success" .= resultSuccessful r
+resultEncoding :: String -> Result -> BB.Builder
+resultEncoding n r = object
+    $ "name" .= string n
+    <> "success" .= bool (resultSuccessful r)
     <> "failure" .= case resultOutcome r of
-        Success -> Nothing
-        Failure reason -> Just $ show reason
-    <> "description" .= resultDescription r
-    <> "summary" .= resultShortDescription r
-    <> "time" .= resultTime r
+        Success -> nul
+        Failure reason -> string (show reason)
+    <> "description" .= string (resultDescription r)
+    <> "summary" .= string (resultShortDescription r)
+    <> "time" .= double (resultTime r)
 
 -- -------------------------------------------------------------------------- --
 -- JSON Result file Option
@@ -114,12 +199,12 @@ jsonReporter = TestReporter resultOption $ \opts tree -> do
 
         return $ \t -> x <$ do
             withBinaryFile filePath WriteMode $ \h ->
-                BB.hPutBuilder h $ fromEncoding $ pairs
-                    $ pair "results" (arrayEnc results)
-                    <> "time" .= t
-                    <> "success" .= x
-                    <> "threads" .= nthreads
-                    <> "testCount" .= length tests
+                BB.hPutBuilder h $ object
+                    $ "results" .= array results
+                    <> "time" .= double t
+                    <> "success" .= bool x
+                    <> "threads" .= int nthreads
+                    <> "testCount" .= int (length tests)
 
 consoleAndJsonReporter :: Ingredient
 consoleAndJsonReporter = composeReporters consoleTestReporter jsonReporter

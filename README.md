@@ -1,4 +1,4 @@
-Write [tasty](https://hackage.haskell.org/packages/tasty) test results to
+Write [tasty](https://hackage.haskell.org/package/tasty) test results to
 a file in JSON format.
 
 Example:

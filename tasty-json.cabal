@@ -3,7 +3,7 @@ name: tasty-json
 version: 0.1.0.0
 synopsis: JSON reporter for the tasty testing framework
 description:
-    Write [tasty](https://hackage.haskell.org/packages/tasty) test results to
+    Write [tasty](https://hackage.haskell.org/package/tasty) test results to
     a file in JSON format.
 
     @

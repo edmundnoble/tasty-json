@@ -5,7 +5,7 @@ synopsis: JSON reporter for the tasty testing framework
 description:
     Write [tasty](https://hackage.haskell.org/package/tasty) test results to
     a file in JSON format.
-
+    .
     @
     defaultMainWithIngredients (consoleAndJsonReporter : defaultIngredients) tests
     @

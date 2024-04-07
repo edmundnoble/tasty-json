@@ -157,6 +157,7 @@ resultEncoding n r = object
     <> "description" .= string (resultDescription r)
     <> "summary" .= string (resultShortDescription r)
     <> "time" .= double (resultTime r)
+    <> "startTime" .= double (resultStartTime r)
 
 -- -------------------------------------------------------------------------- --
 -- JSON Result file Option
@@ -197,15 +198,15 @@ jsonReporter = TestReporter resultOption $ \opts tree -> do
                 return (success, results)
         (x, results) <- foldM go (True, mempty) tests
 
-        return $ \t -> x <$ do
+        return $ \(startTime, timeTaken) -> x <$ do
             withBinaryFile filePath WriteMode $ \h ->
                 BB.hPutBuilder h $ object
                     $ "results" .= array results
-                    <> "time" .= double t
+                    <> "startTime" .= double startTime
+                    <> "time" .= double timeTaken
                     <> "success" .= bool x
                     <> "threads" .= int nthreads
                     <> "testCount" .= int (length tests)
 
 consoleAndJsonReporter :: Ingredient
 consoleAndJsonReporter = composeReporters consoleTestReporter jsonReporter
-
